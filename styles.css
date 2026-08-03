@@ -1,4 +1,4 @@
-/* sImage, static interface with no external dependencies */
+/* sVideo, static interface with no external dependencies */
 :root {
   --bg: #080906;
   --bg-soft: #0d0f0b;
@@ -244,10 +244,11 @@ img, canvas { max-width: 100%; }
 
 /* Studio */
 .studio-section { padding: 112px 0 70px; background: linear-gradient(180deg, #0a0b08, #080906); }
-.studio { overflow: hidden; scroll-margin-top: 92px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: 0 30px 90px rgba(0,0,0,.35); }
+.studio { overflow: clip; scroll-margin-top: 92px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: 0 30px 90px rgba(0,0,0,.35); }
 .dropzone { position: relative; display: flex; min-height: 500px; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; padding: 55px 24px; text-align: center; cursor: pointer; transition: border-color 180ms ease, background 180ms ease; }
 .dropzone::before { position: absolute; inset: 28px; content: ""; pointer-events: none; border: 1px dashed rgba(255,255,255,.18); border-radius: 7px; }
 .dropzone.dragging { background: rgba(255,214,10,.04); box-shadow: inset 0 0 0 2px var(--yellow); }
+.dropzone:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
 .dropzone.dragging::before { border-color: var(--yellow); }
 .drop-grid { position: absolute; inset: 0; opacity: .45; background-image: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px); background-size: 35px 35px; mask-image: radial-gradient(circle, black, transparent 70%); }
 .drop-icon { position: relative; display: grid; width: 76px; height: 76px; margin-bottom: 20px; place-items: center; border: 1px solid rgba(255,214,10,.45); border-radius: 50%; color: var(--yellow); background: rgba(255,214,10,.04); box-shadow: 0 0 0 10px rgba(255,214,10,.025); }
@@ -366,6 +367,7 @@ img, canvas { max-width: 100%; }
 .dimension-grid label { color: var(--muted); font-size: 9px; font-weight: 650; text-transform: uppercase; }
 .dimension-grid label > span { display: flex; margin-top: 7px; align-items: center; border: 1px solid var(--line); border-radius: 4px; background: #0c0e0a; }
 .dimension-grid input { min-width: 0; width: 100%; height: 38px; padding: 0 7px; color: var(--text); border: 0; outline: 0; background: transparent; font-family: var(--mono); font-size: 10px; }
+.dimension-grid input:focus-visible { box-shadow: 0 0 0 2px var(--yellow); }
 .dimension-grid small { padding-right: 7px; color: var(--muted-2); font-family: var(--mono); font-size: 8px; text-transform: lowercase; }
 .check-row { display: block; margin: 10px 0 21px; color: var(--muted); cursor: pointer; font-size: 9px; }
 .check-row input { position: absolute; opacity: 0; }
@@ -377,8 +379,8 @@ img, canvas { max-width: 100%; }
 .select-control { display: block; }
 .select-control > span { position: relative; display: block; margin-top: 7px; }
 .select-control select { width: 100%; height: 42px; appearance: none; padding: 0 30px 0 10px; color: var(--text); border: 1px solid var(--line); border-radius: 4px; outline: 0; background: #0c0e0a; font-size: 10px; }
+.select-control select:focus-visible { border-color: var(--yellow); box-shadow: 0 0 0 2px rgba(255, 214, 10, .35); }
 .select-control svg { position: absolute; top: 13px; right: 9px; width: 15px; pointer-events: none; color: var(--muted); }
-.quality-disabled { opacity: .35; pointer-events: none; }
 .canvas-panel { display: flex; min-width: 0; flex-direction: column; background: #090a08; }
 .canvas-toolbar { display: flex; min-height: 46px; align-items: center; justify-content: space-between; gap: 15px; padding: 0 15px; border-bottom: 1px solid var(--line); color: var(--muted); font-family: var(--mono); font-size: 8px; letter-spacing: .5px; }
 .compare-button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: #131510; cursor: pointer; font-family: var(--font); font-size: 8px; }
@@ -399,13 +401,6 @@ img, canvas { max-width: 100%; }
 .export-summary strong { font-size: 11px; }
 .export-summary small { overflow: hidden; max-width: 400px; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .export-actions { display: flex; flex: 0 0 auto; gap: 8px; }
-
-/* Zoom controls */
-.zoom-controls { display: flex; align-items: center; gap: 2px; }
-.zoom-btn { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; transition: color 160ms ease, border-color 160ms ease; }
-.zoom-btn:hover { color: var(--yellow); border-color: rgba(255,214,10,.35); }
-.zoom-btn svg { width: 13px; }
-.zoom-level { min-width: 36px; text-align: center; color: var(--muted); font-family: var(--mono); font-size: 9px; }
 
 /* Canvas redact toolbar */
 .canvas-redact-toolbar { position: absolute; z-index: 10; top: 15px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 5px; border: 1px solid rgba(255,214,10,.25); border-radius: 8px; background: rgba(14,16,12,.92); backdrop-filter: blur(12px); box-shadow: 0 8px 32px rgba(0,0,0,.4); animation: toolbar-in 200ms ease; }
@@ -597,7 +592,9 @@ img, canvas { max-width: 100%; }
   .privacy-diagram { padding: 14px; }
   .diagram-top { align-items: flex-start; flex-direction: column; gap: 6px; }
   .diagram-flow { min-height: 470px; grid-template-columns: 1fr; grid-template-rows: 1fr 38px 1fr 38px 1fr; }
-  .flow-line { transform: rotate(90deg); }
+  .flow-line { transform: none; width: 1px; height: 38px; justify-content: center; }
+  .flow-line i { width: 1px; height: 100%; background: linear-gradient(180deg, transparent, var(--yellow), transparent); }
+  .flow-line i::after { top: auto; right: auto; bottom: 2px; left: -2px; border-top: 0; border-right: 1px solid var(--yellow); border-bottom: 1px solid var(--yellow); transform: none; }
   .blocked-cloud { margin-top: 10px; }
   .steps-grid { margin: 55px 0 75px; grid-template-columns: 1fr; gap: 48px; }
   .step-line { top: 61px; left: 50%; width: 1px; height: 35px; background: linear-gradient(var(--yellow), transparent); }

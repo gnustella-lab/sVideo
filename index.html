@@ -126,7 +126,7 @@
             <span class="drop-kicker">PRIVATE AREA</span>
             <h3>Drop your video here</h3>
             <p>or choose an MP4, MOV, WebM, or OGG file</p>
-            <button class="button button-primary" type="button" data-open-file>Choose video</button>
+            <button class="button button-primary" type="button" data-open-file aria-hidden="true" tabindex="-1">Choose video</button>
             <small>Your file is never uploaded. Recommended limit: 200 MB.</small>
           </div>
 
@@ -173,13 +173,13 @@
                 </div>
                 <div class="canvas-stage" id="canvasStage">
                   <div class="canvas-redact-toolbar" id="canvasRedactToolbar" hidden>
-                    <button class="canvas-tool-btn active" type="button" data-canvas-redaction="pixelate" aria-label="Pixelate">
+                    <button class="canvas-tool-btn active" type="button" data-canvas-redaction="pixelate" aria-label="Pixelate" aria-pressed="true">
                       <i class="pixel-icon"></i>
                     </button>
-                    <button class="canvas-tool-btn" type="button" data-canvas-redaction="blur" aria-label="Blur">
+                    <button class="canvas-tool-btn" type="button" data-canvas-redaction="blur" aria-label="Blur" aria-pressed="false">
                       <i class="blur-icon"></i>
                     </button>
-                    <button class="canvas-tool-btn" type="button" data-canvas-redaction="bar" aria-label="Solid cover">
+                    <button class="canvas-tool-btn" type="button" data-canvas-redaction="bar" aria-label="Solid cover" aria-pressed="false">
                       <i class="bar-icon"></i>
                     </button>
                     <span class="canvas-tool-divider"></span>

@@ -200,11 +200,30 @@
     $("#changeImage").addEventListener("click", () => elements.fileInput.click());
   }
 
+  const FILE_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "ogg", "ogv", "mpeg", "mpg"]);
+
+  function isSupportedVideoFile(file) {
+    if (SUPPORTED_TYPES.has(file.type)) return true;
+    if (!file.type || file.type === "application/octet-stream") {
+      const extension = file.name.split(".").pop().toLowerCase();
+      return FILE_EXTENSIONS.has(extension);
+    }
+    return false;
+  }
+
+  let loadToken = 0;
+
   async function loadVideoFile(file) {
-    if (!SUPPORTED_TYPES.has(file.type)) {
+    if (state.exportInProgress) {
+      showToast("Wait for the export to finish before loading another file.", true);
+      return;
+    }
+    if (!isSupportedVideoFile(file)) {
       showToast("Unsupported format. Use MP4, MOV, WebM, or OGG.", true);
       return;
     }
+
+    const token = ++loadToken;
 
     if (file.size > 200 * 1024 * 1024) {
       showToast("Large file: processing may use significant memory.");
@@ -214,10 +233,11 @@
 
     try {
       const [video, buffer] = await Promise.all([
-        createVideoFromFile(file),
+        createVideoFromFile(file, token),
         file.arrayBuffer()
       ]);
 
+      if (token !== loadToken) return;
       releaseSourceUrl();
       state.file = file;
       state.video = video;
@@ -231,6 +251,7 @@
       state.selection = null;
       state.drawing = false;
       state.playing = false;
+      state.comparing = false;
 
       elements.fileName.textContent = file.name;
       elements.fileDetails.textContent = `${formatNumber(video.videoWidth)} × ${formatNumber(video.videoHeight)} • ${formatBytes(file.size)} • ${formatTime(state.duration)}`;
@@ -260,13 +281,15 @@
         elements.studio.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     } catch (error) {
-      console.error(error);
-      setExportStatus("Could not open the video", "Try another supported file");
-      showToast("Could not read this video.", true);
+      if (token === loadToken) {
+        console.error(error);
+        setExportStatus("Could not open the video", "Try another supported file");
+        showToast("Could not read this video.", true);
+      }
     }
   }
 
-  function createVideoFromFile(file) {
+  function createVideoFromFile(file, token) {
     return new Promise((resolve, reject) => {
       const video = elements.sourceVideo;
       const url = URL.createObjectURL(file);
@@ -274,6 +297,10 @@
       video.muted = true;
       video.playsInline = true;
       video.onloadedmetadata = () => {
+        if (token !== loadToken) {
+          URL.revokeObjectURL(url);
+          return;
+        }
         video.dataset.objectUrl = url;
         resolve(video);
       };
@@ -286,6 +313,7 @@
   }
 
   function closeVideo() {
+    loadToken += 1;
     releaseSourceUrl();
     if (state.video) {
       state.video.pause();
@@ -297,6 +325,9 @@
     state.redactions = [];
     state.selection = null;
     state.playing = false;
+    state.comparing = false;
+    elements.compareButton.classList.remove("comparing");
+    elements.canvasLabel.textContent = "PROTECTED PREVIEW";
     cancelAnimationFrame(state.previewRaf);
     elements.editor.hidden = true;
     elements.dropzone.hidden = false;
@@ -729,6 +760,8 @@
   function drawFrame(showOriginal = false) {
     const canvas = elements.previewCanvas;
     if (!canvas.width || !canvas.height) return;
+    const video = elements.sourceVideo;
+    if (!state.video || !video.videoWidth || video.readyState < 2) return;
     drawResult(canvasContext, canvas.width, canvas.height, showOriginal);
     if (!showOriginal && state.selection) {
       drawSelection(canvasContext, canvas.width, canvas.height, normalizeSelection(state.selection));
@@ -737,6 +770,7 @@
 
   function drawResult(context, width, height, showOriginal = false) {
     const video = elements.sourceVideo;
+    if (!video.videoWidth) return;
     context.save();
     context.clearRect(0, 0, width, height);
     context.fillStyle = "#000000";
@@ -830,7 +864,9 @@
       button.addEventListener("click", () => {
         state.redactionMode = button.dataset.canvasRedaction;
         $$("[data-canvas-redaction]").forEach((choice) => {
-          choice.classList.toggle("active", choice === button);
+          const active = choice === button;
+          choice.classList.toggle("active", active);
+          choice.setAttribute("aria-pressed", String(active));
         });
         $$("[data-redaction]").forEach((choice) => {
           const active = choice.dataset.redaction === button.dataset.canvasRedaction;
@@ -882,22 +918,38 @@
     let recorder = null;
     const chunks = [];
 
+    // Disable player and file controls while the export drives the shared <video>.
+    const exportControls = [
+      elements.playPauseButton,
+      elements.scrubber,
+      elements.compareButton,
+      $("#closeImage"),
+      $("#changeImage"),
+      elements.fileInput,
+      ...$$("[data-open-file]")
+    ];
+    exportControls.forEach((control) => { if (control) control.disabled = true; });
+
     try {
+      // Wake the decoder/audio pipeline, then rewind to the very start so the
+      // recorder captures the first frame instead of a mid-clip position.
       video.muted = !includeAudio;
       video.volume = includeAudio ? 1 : 0;
       video.currentTime = 0;
-      await new Promise((resolve) => requestAnimationFrame(resolve));
       await video.play();
-
-      // Give the audio track a moment to appear before capturing it.
-      await sleep(250);
+      await sleep(150);
+      video.pause();
+      video.currentTime = 0;
+      await waitForSeeked(video);
 
       const canvasStream = workCanvas.captureStream(60);
       stream = new MediaStream(canvasStream.getVideoTracks());
       if (includeAudio) {
-        const videoStream = video.captureStream();
-        videoStream.getAudioTracks().forEach((track) => stream.addTrack(track));
+        video.captureStream().getAudioTracks().forEach((track) => stream.addTrack(track));
       }
+
+      // Draw the first frame before starting the recorder so frame 0 is kept.
+      drawResult(workContext, output.width, output.height, false);
 
       recorder = new MediaRecorder(stream, {
         mimeType,
@@ -908,13 +960,12 @@
         if (event.data && event.data.size) chunks.push(event.data);
       };
 
-      const finished = new Promise((resolve, reject) => {
-        recorder.onstop = resolve;
+      const finished = new Promise((resolve) => { recorder.onstop = resolve; });
+      const recorderError = new Promise((_, reject) => {
         recorder.onerror = () => reject(new Error("The recorder failed while encoding"));
       });
 
       recorder.start(500);
-      video.currentTime = 0;
 
       const drawExportFrame = () => {
         if (video.ended) return;
@@ -925,7 +976,13 @@
       if ("requestVideoFrameCallback" in video) video.requestVideoFrameCallback(drawExportFrame);
       else state.exportRaf = requestAnimationFrame(drawExportFrame);
 
-      await new Promise((resolve) => video.addEventListener("ended", resolve, { once: true }));
+      await video.play();
+
+      const videoError = new Promise((_, reject) => {
+        video.addEventListener("error", () => reject(new Error("Video playback failed")), { once: true });
+      });
+      const ended = new Promise((resolve) => video.addEventListener("ended", resolve, { once: true }));
+      await Promise.race([ended, recorderError, videoError]);
       await sleep(400);
       if (recorder.state !== "inactive") recorder.stop();
       await finished;
@@ -936,7 +993,7 @@
 
       const sanitized = await sanitizeEncodedBlob(blob, container);
       const verification = scanMetadata(await sanitized.arrayBuffer(), container);
-      if (verification.count > 0) {
+      if (!verification.complete || verification.count > 0) {
         throw new Error("Local verification found metadata in the output");
       }
 
@@ -970,9 +1027,17 @@
       cancelAnimationFrame(state.exportRaf);
       state.exportRaf = null;
       state.exportInProgress = false;
+      exportControls.forEach((control) => { if (control) control.disabled = false; });
       elements.downloadButton.disabled = false;
       elements.downloadButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4"></path><path d="M5 19h14"></path></svg> Download protected video';
     }
+  }
+
+  function waitForSeeked(video) {
+    return new Promise((resolve) => {
+      if (video.seeking) video.addEventListener("seeked", resolve, { once: true });
+      else resolve();
+    });
   }
 
   function createOutputFilename(container) {
@@ -1032,7 +1097,7 @@
     const bytes = new Uint8Array(buffer);
     if (isIsoBmff(bytes)) return scanIsoBmff(bytes);
     if (isWebM(bytes)) return scanWebM(bytes);
-    return { count: 0, bytes: 0, labels: [] };
+    return { count: 0, bytes: 0, labels: [], complete: false };
   }
 
   /* ------------------------------ ISO BMFF (MP4 / MOV) ------------------------------ */
@@ -1048,10 +1113,15 @@
     let offset = start;
     while (offset + 8 <= end) {
       const size = readUint32BE(data, offset);
-      if (size === 0) break;
       const type = ascii(data, offset + 4, 4);
       let headerSize = 8;
       let total = size;
+      if (size === 0) {
+        // A zero size means the box extends to the end of its container.
+        total = end - offset;
+        boxes.push({ start: offset, size: total, headerSize, type, payloadStart: offset + headerSize, end: end });
+        break;
+      }
       if (size === 1) {
         if (offset + 16 > end) break;
         total = readUint64BE(data, offset + 8);
@@ -1094,8 +1164,10 @@
       }
     };
 
-    visit(parseBoxes(data, 0, data.length));
-    return { count, bytes: totalBytes, labels: [...labels] };
+    const top = parseBoxes(data, 0, data.length);
+    visit(top);
+    const complete = top.length > 0 && top[top.length - 1].end === data.length;
+    return { count, bytes: totalBytes, labels: [...labels], complete };
   }
 
   function stripIsoBmffMetadata(data) {
@@ -1262,6 +1334,7 @@
     }
     let size = first & (0xff >> length);
     for (let index = 1; index < length; index += 1) size = size * 256 + data[offset + index];
+    if (length <= 7 && size === Math.pow(2, 7 * length) - 1) return { size: -1, length };
     return { size, length };
   }
 
@@ -1270,12 +1343,12 @@
     if (size === 0) return [0x80];
     let length = 1;
     if (size <= 0x7e) length = 1;
-    else if (size <= 0x3fff) length = 2;
-    else if (size <= 0x1fffff) length = 3;
-    else if (size <= 0x0fffffff) length = 4;
-    else if (size <= 0x7ffffffff) length = 5;
-    else if (size <= 0x3ffffffffff) length = 6;
-    else if (size <= 0x1ffffffffffff) length = 7;
+    else if (size <= 0x3ffe) length = 2;
+    else if (size <= 0x1ffffe) length = 3;
+    else if (size <= 0x0ffffffe) length = 4;
+    else if (size <= 0x7fffffffe) length = 5;
+    else if (size <= 0x3fffffffffe) length = 6;
+    else if (size <= 0x1ffffffffffffe) length = 7;
     else length = 8;
     const bytes = new Array(length);
     let value = size;
@@ -1313,15 +1386,15 @@
     const labels = new Set();
 
     const ebmlId = readEbmlId(data, 0);
-    if (ebmlId.id !== 0x1a45dfa3) return { count: 0, bytes: 0, labels: [] };
+    if (ebmlId.id !== 0x1a45dfa3) return { count: 0, bytes: 0, labels: [], complete: false };
     const ebmlSize = readEbmlSize(data, ebmlId.length);
-    if (!ebmlSize) return { count: 0, bytes: 0, labels: [] };
+    if (!ebmlSize) return { count: 0, bytes: 0, labels: [], complete: false };
     const ebmlEnd = ebmlId.length + ebmlSize.length + (ebmlSize.size === -1 ? data.length : ebmlSize.size);
 
     const segmentId = readEbmlId(data, ebmlEnd);
-    if (segmentId.id !== EBML_SEGMENT) return { count: 0, bytes: 0, labels: [] };
+    if (segmentId.id !== EBML_SEGMENT) return { count: 0, bytes: 0, labels: [], complete: false };
     const segmentSize = readEbmlSize(data, ebmlEnd + segmentId.length);
-    if (!segmentSize) return { count: 0, bytes: 0, labels: [] };
+    if (!segmentSize) return { count: 0, bytes: 0, labels: [], complete: false };
     const segmentPayloadStart = ebmlEnd + segmentId.length + segmentSize.length;
     const segmentEnd = segmentSize.size === -1 ? data.length : Math.min(data.length, segmentPayloadStart + segmentSize.size);
 
@@ -1357,7 +1430,8 @@
       offset = elementEnd;
     }
 
-    return { count, bytes: totalBytes, labels: [...labels] };
+    const complete = offset === segmentEnd;
+    return { count, bytes: totalBytes, labels: [...labels], complete };
   }
 
   function stripWebMMetadata(data) {
@@ -1386,57 +1460,82 @@
       const payloadStart = offset + element.length + size.length;
       const elementEnd = size.size === -1 ? segmentEnd : Math.min(segmentEnd, payloadStart + size.size);
       if (elementEnd > data.length) break;
-      segments.push({ id: element.id, start: offset, payloadStart, end: elementEnd });
+      // An unknown-size element (live clusters from MediaRecorder) consumes the
+      // rest of the segment; treat it as the last element.
+      segments.push({
+        id: element.id,
+        start: offset,
+        payloadStart,
+        end: elementEnd,
+        idLength: element.length,
+        sizeLength: size.length,
+        unknown: size.size === -1
+      });
       offset = elementEnd;
+      if (size.size === -1) break;
     }
 
-    const removedRanges = [];
+    const removedIds = new Set([EBML_SEEK_HEAD, EBML_TAGS]);
+    let removedCount = 0;
     for (const element of segments) {
-      if (element.id === EBML_SEEK_HEAD || element.id === EBML_TAGS) {
-        removedRanges.push({ start: element.start - segmentPayloadStart, end: element.end - segmentPayloadStart });
-      } else if (element.id === EBML_INFO) {
+      if (removedIds.has(element.id)) removedCount += 1;
+      else if (element.id === EBML_INFO) {
         let inner = element.payloadStart;
         while (inner + 2 <= element.end) {
           const field = readEbmlId(data, inner);
           const fieldSize = readEbmlSize(data, inner + field.length);
           if (!field.length || !fieldSize) break;
           const fieldEnd = fieldSize.size === -1 ? element.end : Math.min(element.end, inner + field.length + fieldSize.length + fieldSize.size);
-          if (EBML_INFO_FIELDS.has(field.id)) {
-            removedRanges.push({ start: inner - segmentPayloadStart, end: fieldEnd - segmentPayloadStart });
-          }
+          if (EBML_INFO_FIELDS.has(field.id)) removedCount += 1;
           inner = fieldEnd;
         }
       }
     }
-    removedRanges.sort((a, b) => a.start - b.start);
 
-    if (!removedRanges.length) return data;
+    if (!removedCount) return data;
 
-    const removedBefore = (relativePosition) => {
-      let total = 0;
-      for (const range of removedRanges) {
-        if (range.start >= relativePosition) break;
-        total += Math.min(range.end, relativePosition) - range.start;
-      }
-      return total;
-    };
-
-    const parts = [data.subarray(0, ebmlEnd)];
+    // Rebuild the segment payload, tracking the real byte delta of each element
+    // (rebuilt headers may change VINT width) so Cue positions stay accurate.
+    const deltaEntries = [];
     const payloadParts = [];
     for (const element of segments) {
-      if (element.id === EBML_SEEK_HEAD || element.id === EBML_TAGS) continue;
-      if (element.id === EBML_INFO) {
-        payloadParts.push(rebuildInfo(data, element));
+      const relativeStart = element.start - segmentPayloadStart;
+      let rebuilt = null;
+      if (removedIds.has(element.id)) {
+        rebuilt = null;
+      } else if (element.id === EBML_INFO) {
+        rebuilt = rebuildInfo(data, element);
       } else if (element.id === EBML_CUES) {
-        payloadParts.push(rebuildCues(data, element, removedBefore));
+        rebuilt = rebuildCues(data, element, (position) => {
+          let total = 0;
+          for (const entry of deltaEntries) {
+            if (entry.relativeStart >= position) break;
+            total += entry.delta;
+          }
+          return total;
+        });
+      } else if (element.unknown) {
+        // Rewrite the unknown-size header with the real payload length so the
+        // output is fully finite and maximally compatible.
+        const idBytes = data.subarray(element.start, element.start + element.idLength);
+        const payload = data.subarray(element.payloadStart, element.end);
+        rebuilt = concatBytes([idBytes, Uint8Array.from(encodeEbmlSize(payload.length)), payload]);
       } else {
-        payloadParts.push(data.subarray(element.start, element.end));
+        rebuilt = data.subarray(element.start, element.end);
+      }
+      if (rebuilt) {
+        payloadParts.push(rebuilt);
+        deltaEntries.push({ relativeStart, delta: (element.end - element.start) - rebuilt.length });
+      } else {
+        deltaEntries.push({ relativeStart, delta: element.end - element.start });
       }
     }
     const newPayload = concatBytes(payloadParts);
+    const parts = [data.subarray(0, ebmlEnd)];
     parts.push(new Uint8Array([0x18, 0x53, 0x80, 0x67]));
     parts.push(Uint8Array.from(encodeEbmlSize(newPayload.length)));
     parts.push(newPayload);
+    if (segmentEnd < data.length) parts.push(data.subarray(segmentEnd));
     return concatBytes(parts);
   }
 
@@ -1581,8 +1680,8 @@
   }
 
   function parseInteger(value) {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : 0;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
   }
 
   function formatBytes(bytes) {
