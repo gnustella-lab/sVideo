@@ -1,0 +1,19 @@
+{
+  "name": "sVideo, privacy for your videos",
+  "short_name": "sVideo",
+  "description": "Remove metadata and hide sensitive visual details without uploading your videos.",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#080906",
+  "theme_color": "#080906",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
