@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Discontinued:** This project has been discontinued in favor of [sTools](https://github.com/gnustella-lab/stools) — another project from the [gnustella-lab](https://github.com/gnustella-lab) account. It will no longer receive updates.
+
 # sVideo
 
 A static video studio focused on privacy. Every operation runs in the browser, with no uploads, accounts, cookies, or analytics.
